@@ -49,20 +49,18 @@ export default function Sidebar() {
 
         {/* Spotify */}
         {spotify.connected ? (
-          <button className="connect-btn" onClick={disconnectSpotify}>
+          <button className="connect-btn" onClick={disconnectSpotify} title="Click to disconnect">
             <span className="connect-btn-dot spotify connected" style={{ color: '#1db954' }} />
             <span className="connect-btn-label">Spotify</span>
-            {spotify.user && (
-              <span className="connect-btn-status" style={{ maxWidth: 70, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {spotify.user.display_name || spotify.user.id}
-              </span>
-            )}
+            <span className="connect-btn-status" style={{ maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {spotify.user?.display_name || spotify.user?.id || 'Connected'}
+            </span>
           </button>
         ) : (
           <button className="connect-btn" onClick={handleSpotifyConnect}>
             <span className="connect-btn-dot spotify disconnected" />
             <span className="connect-btn-label">Spotify</span>
-            <span className="connect-btn-status">Connect</span>
+            <span className="connect-btn-status" style={{ color: '#1db954' }}>Connect →</span>
           </button>
         )}
 

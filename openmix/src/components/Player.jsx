@@ -76,11 +76,15 @@ export default function Player() {
         console.error('Spotify init error:', message)
       )
       player.addListener('authentication_error', () => {
-        // Token missing streaming scope — force re-auth
+        // Token is missing streaming scope or expired — disconnect so
+        // the sidebar shows "Connect" and the user can re-auth cleanly
+        setSpotifyDeviceId(null)
         disconnectSpotify()
       })
       player.addListener('account_error', () => {
-        alert('Spotify Premium is required for full track playback.')
+        // Premium not available — don't alert, just clear device
+        setSpotifyDeviceId(null)
+        console.warn('Spotify Premium required for Web Playback SDK')
       })
 
       player.connect()
