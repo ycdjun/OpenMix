@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import useStore from '../store'
 import { getWidgetUrl, loadSCWidgetSDK } from '../services/soundcloud'
-import { loadSpotifySDK, startPlayback, transferPlayback, initiateSpotifyAuth } from '../services/spotify'
+import { loadSpotifySDK, startPlayback, initiateSpotifyAuth } from '../services/spotify'
 
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds)) return '0:00'
@@ -28,6 +28,9 @@ export default function Player() {
   const scWidgetRef = useRef(null)
   const scReadyRef = useRef(false)
   const lastPositionRef = useRef(0)
+  // null | 'auth' | 'account'
+  const [sdkError, setSdkError] = useState(null)
+  const [playbackError, setPlaybackError] = useState(null)
 
   const currentTrack = queue[currentIndex] ?? null
   const isSpotify = currentTrack?.source === 'spotify'
@@ -38,6 +41,8 @@ export default function Player() {
     if (!spotify.connected || !spotify.accessToken) return
 
     let player = null
+    setSdkError(null)
+    setPlaybackError(null)
 
     loadSpotifySDK().then(() => {
       player = new window.Spotify.Player({
@@ -49,11 +54,9 @@ export default function Player() {
       player.addListener('ready', ({ device_id }) => {
         console.log('Spotify SDK ready, device_id:', device_id)
         spotifyPlayerRef.current = player
-        // Transfer playback to this SDK device so Spotify recognises it as active,
-        // then expose the device_id (which triggers startPlayback if a track is queued).
-        transferPlayback(useStore.getState().spotify.accessToken, device_id)
-          .catch((err) => console.warn('Transfer playback failed (non-fatal):', err))
-          .finally(() => setSpotifyDeviceId(device_id))
+        setSdkError(null)
+        // Expose device_id — triggers startPlayback effect if a track is queued
+        setSpotifyDeviceId(device_id)
       })
 
       player.addListener('not_ready', ({ device_id }) => {
@@ -88,20 +91,23 @@ export default function Player() {
       player.addListener('initialization_error', ({ message }) =>
         console.error('Spotify init error:', message)
       )
-      player.addListener('playback_error', ({ message }) =>
+      player.addListener('playback_error', ({ message }) => {
         console.error('Spotify playback error:', message)
-      )
+        setPlaybackError(message)
+      })
       player.addListener('authentication_error', ({ message }) => {
         // Token lacks streaming scope — keep connected state so browsing still works;
         // player bar will show a reconnect prompt
         console.warn('Spotify authentication error:', message)
         setSpotifyDeviceId(null)
+        setSdkError('auth')
         useStore.getState().setNeedsReauth(true)
       })
       player.addListener('account_error', ({ message }) => {
         // Premium not available
         console.warn('Spotify account error (Premium required):', message)
         setSpotifyDeviceId(null)
+        setSdkError('account')
       })
 
       player.connect().then((success) => {
@@ -133,11 +139,15 @@ export default function Player() {
   // ── Start playback when SDK device becomes ready ──────────────────────────────
   useEffect(() => {
     if (!spotifyDeviceId || !currentTrack || !isSpotify || !spotify.accessToken) return
+    setPlaybackError(null)
     startPlayback(
       spotify.accessToken,
       spotifyDeviceId,
       `spotify:track:${currentTrack.spotifyId}`
-    ).catch((err) => console.error('startPlayback on ready:', err))
+    ).catch((err) => {
+      console.error('startPlayback on ready:', err)
+      setPlaybackError(err.message)
+    })
   }, [spotifyDeviceId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Track change ─────────────────────────────────────────────────────────────
@@ -147,11 +157,15 @@ export default function Player() {
     if (isSpotify) {
       scWidgetRef.current?.pause?.()
       if (spotifyDeviceId && spotify.accessToken) {
+        setPlaybackError(null)
         startPlayback(
           spotify.accessToken,
           spotifyDeviceId,
           `spotify:track:${currentTrack.spotifyId}`
-        ).catch((err) => console.error('startPlayback error:', err))
+        ).catch((err) => {
+          console.error('startPlayback error:', err)
+          setPlaybackError(err.message)
+        })
       }
     }
 
@@ -256,28 +270,38 @@ export default function Player() {
       />
 
       <div className="player">
-        {/* Reconnect banner — shown when streaming scope is missing / token expired */}
-        {needsReauth && (
+        {/* SDK error banners */}
+        {(needsReauth || sdkError === 'account' || playbackError) && (
           <div style={{
             position: 'absolute', top: 0, left: 0, right: 0,
-            background: 'var(--spotify)', color: '#000',
+            background: sdkError === 'account' ? '#b91c1c' : 'var(--spotify)',
+            color: sdkError === 'account' ? '#fff' : '#000',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             gap: 12, padding: '6px 16px', fontSize: 13, fontWeight: 500, zIndex: 10,
           }}>
-            <span>Spotify needs updated permissions to play tracks</span>
-            <button
-              style={{
-                background: '#000', color: 'var(--spotify)',
-                border: 'none', borderRadius: 20, padding: '4px 14px',
-                fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              }}
-              onClick={() => {
-                setNeedsReauth(false)
-                initiateSpotifyAuth(config.spotifyClientId, config.redirectUri)
-              }}
-            >
-              Reconnect
-            </button>
+            {sdkError === 'account' ? (
+              <span>Spotify Premium is required for full-track playback</span>
+            ) : playbackError && !needsReauth ? (
+              <span title={playbackError}>Playback error: {playbackError}</span>
+            ) : (
+              <>
+                <span>Spotify needs updated permissions to play tracks</span>
+                <button
+                  style={{
+                    background: '#000', color: 'var(--spotify)',
+                    border: 'none', borderRadius: 20, padding: '4px 14px',
+                    fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  }}
+                  onClick={() => {
+                    setNeedsReauth(false)
+                    setSdkError(null)
+                    initiateSpotifyAuth(config.spotifyClientId, config.redirectUri)
+                  }}
+                >
+                  Reconnect
+                </button>
+              </>
+            )}
           </div>
         )}
 
