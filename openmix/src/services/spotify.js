@@ -41,6 +41,9 @@ export async function initiateSpotifyAuth(clientId, redirectUri) {
       'user-top-read',
       'user-library-read',
       'user-read-recently-played',
+      'streaming',
+      'user-read-playback-state',
+      'user-modify-playback-state',
     ].join(' '),
   })
 
@@ -127,6 +130,40 @@ export async function getTopTracks(token) {
 export async function getRecentTracks(token) {
   const data = await apiFetch('/me/player/recently-played?limit=20', token)
   return (data.items || []).map((item) => normalizeSpotifyTrack(item.track))
+}
+
+// ── Web Playback SDK ──────────────────────────────────────────────────────────
+
+let sdkLoaded = false
+let sdkPromise = null
+
+export function loadSpotifySDK() {
+  if (sdkLoaded) return Promise.resolve()
+  if (sdkPromise) return sdkPromise
+
+  sdkPromise = new Promise((resolve) => {
+    if (window.Spotify) { sdkLoaded = true; resolve(); return }
+    window.onSpotifyWebPlaybackSDKReady = () => { sdkLoaded = true; resolve() }
+    const script = document.createElement('script')
+    script.src = 'https://sdk.scdn.co/spotify-player.js'
+    document.head.appendChild(script)
+  })
+
+  return sdkPromise
+}
+
+// ── Playback control API ──────────────────────────────────────────────────────
+
+export async function startPlayback(token, deviceId, uri, positionMs = 0) {
+  const res = await fetch(
+    `${SPOTIFY_API_URL}/me/player/play?device_id=${deviceId}`,
+    {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uris: [uri], position_ms: positionMs }),
+    }
+  )
+  if (!res.ok && res.status !== 204) throw new Error(`Playback failed: ${res.status}`)
 }
 
 // ── Normalizer ────────────────────────────────────────────────────────────────

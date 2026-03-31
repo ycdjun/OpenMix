@@ -88,6 +88,10 @@ const useStore = create(
           playing: s.currentIndex > 0,
         })),
 
+      // ── Spotify device (not persisted) ───────────────────────────────────────
+      spotifyDeviceId: null,
+      setSpotifyDeviceId: (id) => set({ spotifyDeviceId: id }),
+
       // ── Player ────────────────────────────────────────────────────────
       playing: false,
       volume: 0.8,

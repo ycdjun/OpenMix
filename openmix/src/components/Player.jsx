@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef } from 'react'
 import useStore from '../store'
 import { getWidgetUrl, loadSCWidgetSDK } from '../services/soundcloud'
+import { loadSpotifySDK, startPlayback } from '../services/spotify'
 
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds)) return '0:00'
@@ -17,97 +18,134 @@ export default function Player() {
     progress, setProgress,
     duration, setDuration,
     playNext, playPrev,
+    spotify, disconnectSpotify,
+    spotifyDeviceId, setSpotifyDeviceId,
   } = useStore()
 
-  const audioRef = useRef(null)
+  const spotifyPlayerRef = useRef(null)
   const scIframeRef = useRef(null)
   const scWidgetRef = useRef(null)
-  const isSeeking = useRef(false)
-  const [scReady, setScReady] = useState(false)
+  const scReadyRef = useRef(false)
+  const lastPositionRef = useRef(0)
 
   const currentTrack = queue[currentIndex] ?? null
   const isSpotify = currentTrack?.source === 'spotify'
   const isSoundCloud = currentTrack?.source === 'soundcloud'
 
-  // ── Load SoundCloud Widget SDK ──────────────────────────────────────────────
+  // ── Spotify Web Playback SDK ─────────────────────────────────────────────────
   useEffect(() => {
-    loadSCWidgetSDK().catch(() => {})
-  }, [])
+    if (!spotify.connected || !spotify.accessToken) return
 
-  // ── Track change ────────────────────────────────────────────────────────────
+    let cleanup = () => {}
+
+    loadSpotifySDK().then(() => {
+      const player = new window.Spotify.Player({
+        name: 'OpenMix',
+        getOAuthToken: (cb) => cb(useStore.getState().spotify.accessToken),
+        volume: useStore.getState().volume,
+      })
+
+      player.addListener('ready', ({ device_id }) => {
+        spotifyPlayerRef.current = player
+        setSpotifyDeviceId(device_id)
+      })
+
+      player.addListener('not_ready', () => {
+        setSpotifyDeviceId(null)
+      })
+
+      player.addListener('player_state_changed', (state) => {
+        if (!state) return
+        const pos = state.position / 1000
+        const dur = state.duration / 1000
+        setDuration(dur)
+
+        // Detect natural track end: position resets to 0 while paused after being near end
+        if (state.paused && state.position === 0 && lastPositionRef.current > dur - 3 && dur > 3) {
+          lastPositionRef.current = 0
+          playNext()
+          return
+        }
+
+        setPlaying(!state.paused)
+        setProgress(pos)
+        lastPositionRef.current = pos
+      })
+
+      player.addListener('initialization_error', ({ message }) =>
+        console.error('Spotify init error:', message)
+      )
+      player.addListener('authentication_error', () => {
+        // Token missing streaming scope — force re-auth
+        disconnectSpotify()
+      })
+      player.addListener('account_error', () => {
+        alert('Spotify Premium is required for full track playback.')
+      })
+
+      player.connect()
+      cleanup = () => { player.disconnect(); setSpotifyDeviceId(null) }
+    })
+
+    return () => cleanup()
+  }, [spotify.connected, spotify.accessToken]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Progress polling during Spotify playback ──────────────────────────────────
   useEffect(() => {
-    if (!currentTrack) {
-      setProgress(0)
-      setDuration(0)
-      return
-    }
+    if (!isSpotify || !playing || !spotifyPlayerRef.current) return
+    const interval = setInterval(() => {
+      spotifyPlayerRef.current?.getCurrentState().then((state) => {
+        if (state && !state.paused) {
+          const pos = state.position / 1000
+          setProgress(pos)
+          lastPositionRef.current = pos
+        }
+      }).catch(() => {})
+    }, 500)
+    return () => clearInterval(interval)
+  }, [isSpotify, playing]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Track change ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!currentTrack) { setProgress(0); setDuration(0); return }
 
     if (isSpotify) {
-      // Pause SC widget
       scWidgetRef.current?.pause?.()
-
-      const audio = audioRef.current
-      if (!audio) return
-
-      if (currentTrack.previewUrl) {
-        audio.src = currentTrack.previewUrl
-        audio.load()
-        if (playing) audio.play().catch(() => setPlaying(false))
-      } else {
-        // No preview — open in Spotify
-        audio.src = ''
-        setDuration(currentTrack.duration || 0)
-        setProgress(0)
-        if (currentTrack.externalUrl) {
-          window.open(currentTrack.externalUrl, '_blank')
-        }
-        setPlaying(false)
+      if (spotifyDeviceId && spotify.accessToken) {
+        startPlayback(
+          spotify.accessToken,
+          spotifyDeviceId,
+          `spotify:track:${currentTrack.spotifyId}`
+        ).catch((err) => console.error('startPlayback error:', err))
       }
     }
 
     if (isSoundCloud) {
-      // Pause HTML audio
-      const audio = audioRef.current
-      if (audio) { audio.pause(); audio.src = '' }
-
-      // Load SC widget
+      spotifyPlayerRef.current?.pause?.()
       if (currentTrack.permalinkUrl && scIframeRef.current) {
-        const widgetUrl = getWidgetUrl(currentTrack.permalinkUrl)
-        scIframeRef.current.src = widgetUrl
-        setScReady(false)
+        scIframeRef.current.src = getWidgetUrl(currentTrack.permalinkUrl)
+        scReadyRef.current = false
       }
     }
   }, [currentIndex, currentTrack?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Play / Pause (Spotify) ──────────────────────────────────────────────────
+  // ── SoundCloud play/pause sync ────────────────────────────────────────────────
   useEffect(() => {
-    if (!isSpotify) return
-    const audio = audioRef.current
-    if (!audio || !currentTrack?.previewUrl) return
+    if (!isSoundCloud || !scReadyRef.current) return
+    if (playing) scWidgetRef.current?.play?.()
+    else scWidgetRef.current?.pause?.()
+  }, [playing, isSoundCloud])
 
-    if (playing) {
-      audio.play().catch(() => setPlaying(false))
-    } else {
-      audio.pause()
-    }
-  }, [playing, isSpotify]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Play / Pause (SoundCloud) ───────────────────────────────────────────────
+  // ── Volume sync ───────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!isSoundCloud || !scReady) return
-    if (playing) {
-      scWidgetRef.current?.play?.()
-    } else {
-      scWidgetRef.current?.pause?.()
-    }
-  }, [playing, isSoundCloud, scReady])
-
-  // ── Volume (Spotify) ────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (audioRef.current) audioRef.current.volume = volume
+    spotifyPlayerRef.current?.setVolume?.(volume).catch?.(() => {})
+    if (scReadyRef.current) scWidgetRef.current?.setVolume?.(volume * 100)
   }, [volume])
 
-  // ── SC widget message listener ──────────────────────────────────────────────
+  // ── Load SoundCloud SDK ───────────────────────────────────────────────────────
+  useEffect(() => { loadSCWidgetSDK().catch(() => {}) }, [])
+
+  // ── SC iframe load → bind widget ──────────────────────────────────────────────
   useEffect(() => {
     const iframe = scIframeRef.current
     if (!iframe) return
@@ -115,73 +153,56 @@ export default function Player() {
     const onLoad = () => {
       const SC = window.SC
       if (!SC?.Widget) return
-
       const widget = SC.Widget(iframe)
       scWidgetRef.current = widget
 
       widget.bind(SC.Widget.Events.READY, () => {
-        setScReady(true)
-        widget.setVolume(volume * 100)
-        if (playing) widget.play()
+        scReadyRef.current = true
+        widget.setVolume(useStore.getState().volume * 100)
+        if (useStore.getState().playing) widget.play()
       })
-
       widget.bind(SC.Widget.Events.PLAY_PROGRESS, (e) => {
-        if (!isSeeking.current) {
-          setProgress(e.currentPosition / 1000)
-          if (e.relativePosition > 0) {
-            setDuration(Math.round(e.currentPosition / 1000 / e.relativePosition))
-          }
-        }
+        setProgress(e.currentPosition / 1000)
+        if (e.relativePosition > 0)
+          setDuration(Math.round(e.currentPosition / 1000 / e.relativePosition))
       })
-
-      widget.bind(SC.Widget.Events.FINISH, () => {
-        playNext()
-      })
+      widget.bind(SC.Widget.Events.FINISH, () => playNext())
     }
 
     iframe.addEventListener('load', onLoad)
     return () => iframe.removeEventListener('load', onLoad)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── SC volume ───────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (scReady && scWidgetRef.current) {
-      scWidgetRef.current.setVolume?.(volume * 100)
+  // ── Play / Pause ─────────────────────────────────────────────────────────────
+  const handlePlayPause = () => {
+    if (!currentTrack && queue.length > 0) {
+      useStore.getState().setCurrentIndex(0)
+      setPlaying(true)
+      return
     }
-  }, [volume, scReady])
+    if (isSpotify && spotifyPlayerRef.current) {
+      spotifyPlayerRef.current.togglePlay().catch(() => {})
+      // SDK fires player_state_changed which updates store's playing
+    } else if (isSoundCloud) {
+      const next = !playing
+      if (next) scWidgetRef.current?.play?.()
+      else scWidgetRef.current?.pause?.()
+      setPlaying(next)
+    }
+  }
 
-  // ── HTML Audio event handlers ───────────────────────────────────────────────
-  const handleTimeUpdate = useCallback(() => {
-    if (isSeeking.current) return
-    const audio = audioRef.current
-    if (audio) setProgress(audio.currentTime)
-  }, [setProgress])
-
-  const handleLoadedMetadata = useCallback(() => {
-    const audio = audioRef.current
-    if (audio) setDuration(audio.duration)
-  }, [setDuration])
-
-  const handleEnded = useCallback(() => {
-    playNext()
-  }, [playNext])
-
-  const handleAudioPlay = useCallback(() => setPlaying(true), [setPlaying])
-  const handleAudioPause = useCallback(() => {}, [])
-
-  // ── Progress bar seek ───────────────────────────────────────────────────────
+  // ── Seek ──────────────────────────────────────────────────────────────────────
   const handleProgressClick = (e) => {
     if (!duration) return
     const rect = e.currentTarget.getBoundingClientRect()
     const ratio = (e.clientX - rect.left) / rect.width
-    const newTime = ratio * duration
-
-    if (isSpotify && audioRef.current) {
-      audioRef.current.currentTime = newTime
-      setProgress(newTime)
+    const ms = ratio * duration * 1000
+    if (isSpotify && spotifyPlayerRef.current) {
+      spotifyPlayerRef.current.seek(ms).catch(() => {})
+      setProgress(ms / 1000)
     } else if (isSoundCloud && scWidgetRef.current) {
-      scWidgetRef.current.seekTo?.(newTime * 1000)
-      setProgress(newTime)
+      scWidgetRef.current.seekTo?.(ms)
+      setProgress(ms / 1000)
     }
   }
 
@@ -189,18 +210,6 @@ export default function Player() {
 
   return (
     <>
-      {/* Hidden HTML audio element */}
-      <audio
-        ref={audioRef}
-        onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={handleLoadedMetadata}
-        onEnded={handleEnded}
-        onPlay={handleAudioPlay}
-        onPause={handleAudioPause}
-        style={{ display: 'none' }}
-      />
-
-      {/* Hidden SC widget iframe */}
       <iframe
         ref={scIframeRef}
         id="sc-widget"
@@ -228,7 +237,7 @@ export default function Player() {
                   <span className={`source-dot ${currentTrack.source}`} />
                   <span style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 1 }}>
                     {currentTrack.source === 'spotify' ? 'Spotify' : 'SoundCloud'}
-                    {isSpotify && !currentTrack.previewUrl && ' · no preview'}
+                    {isSpotify && !spotifyDeviceId && ' · connecting…'}
                   </span>
                 </div>
               </div>
@@ -238,24 +247,19 @@ export default function Player() {
           )}
         </div>
 
-        {/* Controls + Progress */}
+        {/* Controls */}
         <div className="player-controls">
           <div className="player-buttons">
-            <button className="player-btn" onClick={playPrev} disabled={currentIndex <= 0} style={currentIndex <= 0 ? { opacity: 0.3 } : {}}>
+            <button
+              className="player-btn"
+              onClick={playPrev}
+              disabled={currentIndex <= 0}
+              style={currentIndex <= 0 ? { opacity: 0.3 } : {}}
+            >
               <PrevIcon />
             </button>
 
-            <button
-              className="player-btn-play"
-              onClick={() => {
-                if (!currentTrack && queue.length > 0) {
-                  useStore.getState().setCurrentIndex(0)
-                  setPlaying(true)
-                } else {
-                  setPlaying(!playing)
-                }
-              }}
-            >
+            <button className="player-btn-play" onClick={handlePlayPause}>
               {playing ? <PauseIcon /> : <PlayIcon />}
             </button>
 
@@ -293,9 +297,7 @@ export default function Player() {
             <input
               type="range"
               className="volume-slider"
-              min="0"
-              max="1"
-              step="0.01"
+              min="0" max="1" step="0.01"
               value={volume}
               onChange={(e) => setVolume(parseFloat(e.target.value))}
             />
@@ -307,33 +309,14 @@ export default function Player() {
 }
 
 function PlayIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="currentColor">
-      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
-    </svg>
-  )
+  return <svg viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
 }
-
 function PauseIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="currentColor">
-      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-    </svg>
-  )
+  return <svg viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
 }
-
 function PrevIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="currentColor">
-      <path d="M8.445 14.832A1 1 0 0010 14v-2.798l5.445 3.63A1 1 0 0017 14V6a1 1 0 00-1.555-.832L10 8.798V6a1 1 0 00-1.555-.832l-6 4a1 1 0 000 1.664l6 4z" />
-    </svg>
-  )
+  return <svg viewBox="0 0 20 20" fill="currentColor"><path d="M8.445 14.832A1 1 0 0010 14v-2.798l5.445 3.63A1 1 0 0017 14V6a1 1 0 00-1.555-.832L10 8.798V6a1 1 0 00-1.555-.832l-6 4a1 1 0 000 1.664l6 4z" /></svg>
 }
-
 function NextIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="currentColor">
-      <path d="M4.555 5.168A1 1 0 003 6v8a1 1 0 001.555.832L10 11.202V14a1 1 0 001.555.832l6-4a1 1 0 000-1.664l-6-4A1 1 0 0010 6v2.798L4.555 5.168z" />
-    </svg>
-  )
+  return <svg viewBox="0 0 20 20" fill="currentColor"><path d="M4.555 5.168A1 1 0 003 6v8a1 1 0 001.555.832L10 11.202V14a1 1 0 001.555.832l6-4a1 1 0 000-1.664l-6-4A1 1 0 0010 6v2.798L4.555 5.168z" /></svg>
 }

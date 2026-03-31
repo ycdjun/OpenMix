@@ -77,9 +77,6 @@ export default function TrackCard({ track, onPlay, showAdd = true, inQueue = fal
             <span className={`source-dot ${track.source}`} />
             {track.source === 'spotify' ? 'Spotify' : 'SoundCloud'}
           </span>
-          {track.source === 'spotify' && !track.previewUrl && (
-            <span className="no-preview-badge">no preview</span>
-          )}
         </div>
       </div>
 
