@@ -29,12 +29,16 @@ export async function initiateSpotifyAuth(clientId, redirectUri) {
   const challenge = await generateCodeChallenge(verifier)
   localStorage.setItem('spotify_code_verifier', verifier)
 
+  // Encode verifier in state so cross-origin redirects (e.g. localhost → github.io) still work
+  const state = btoa(JSON.stringify({ verifier }))
+
   const params = new URLSearchParams({
     client_id: clientId,
     response_type: 'code',
     redirect_uri: redirectUri,
     code_challenge_method: 'S256',
     code_challenge: challenge,
+    state,
     scope: [
       'user-read-private',
       'user-read-email',

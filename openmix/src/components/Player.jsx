@@ -105,6 +105,16 @@ export default function Player() {
     return () => clearInterval(interval)
   }, [isSpotify, playing]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Start playback when SDK device becomes ready ──────────────────────────────
+  useEffect(() => {
+    if (!spotifyDeviceId || !currentTrack || !isSpotify || !spotify.accessToken) return
+    startPlayback(
+      spotify.accessToken,
+      spotifyDeviceId,
+      `spotify:track:${currentTrack.spotifyId}`
+    ).catch((err) => console.error('startPlayback on ready:', err))
+  }, [spotifyDeviceId]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Track change ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!currentTrack) { setProgress(0); setDuration(0); return }

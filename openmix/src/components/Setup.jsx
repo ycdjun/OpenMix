@@ -133,7 +133,7 @@ export default function Setup() {
 
           {/* ── Playback note ────────────────────────────── */}
           <div style={{ background: 'var(--surface-2)', borderRadius: 'var(--radius-md)', padding: '12px 14px', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-            <strong style={{ color: 'var(--text)' }}>Playback note:</strong> Spotify tracks play as 30-second previews (no Premium required). SoundCloud tracks play via the embeddable widget. To listen to full Spotify tracks, open them in the Spotify app via the external link.
+            <strong style={{ color: 'var(--text)' }}>Playback note:</strong> Spotify tracks play in full via the Web Playback SDK — a Spotify Premium account is required. SoundCloud tracks play via the embeddable widget.
           </div>
         </div>
 

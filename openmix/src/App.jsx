@@ -24,6 +24,15 @@ export default function App() {
     }
 
     if (code && config.spotifyClientId) {
+      // Restore verifier from state param (handles cross-origin redirects)
+      const state = params.get('state')
+      if (state) {
+        try {
+          const { verifier } = JSON.parse(atob(state))
+          if (verifier) localStorage.setItem('spotify_code_verifier', verifier)
+        } catch (_) {}
+      }
+
       window.history.replaceState({}, '', window.location.pathname)
 
       exchangeCodeForToken(code, config.spotifyClientId, config.redirectUri)
