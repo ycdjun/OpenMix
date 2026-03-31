@@ -49,11 +49,11 @@ export default function HomeView() {
                 <div className="connect-card-logo spotify">🎵</div>
                 <div>
                   <div className="connect-card-title">Spotify</div>
-                  <div className="connect-card-sub">Search & preview tracks</div>
+                  <div className="connect-card-sub">Full tracks · Premium required</div>
                 </div>
               </div>
               <div className="connect-card-body">
-                Browse your top tracks, recent history, and search the full Spotify catalog with 30-second previews.
+                Browse your top tracks, recent history, and search the full Spotify catalog. Full track playback requires Spotify Premium.
               </div>
               <button
                 className="btn btn-spotify btn-sm"
