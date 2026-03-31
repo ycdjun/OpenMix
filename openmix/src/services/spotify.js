@@ -159,6 +159,17 @@ export function loadSpotifySDK() {
 
 // ── Playback control API ──────────────────────────────────────────────────────
 
+// Transfer playback to a specific device without starting it.
+// Must be called after the SDK device registers so Spotify recognises it as active.
+export async function transferPlayback(token, deviceId) {
+  const res = await fetch(`${SPOTIFY_API_URL}/me/player`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device_ids: [deviceId], play: false }),
+  })
+  if (!res.ok && res.status !== 204) throw new Error(`Transfer playback failed: ${res.status}`)
+}
+
 export async function startPlayback(token, deviceId, uri, positionMs = 0) {
   const res = await fetch(
     `${SPOTIFY_API_URL}/me/player/play?device_id=${deviceId}`,

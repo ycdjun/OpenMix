@@ -91,6 +91,8 @@ const useStore = create(
       // ── Spotify device (not persisted) ───────────────────────────────────────
       spotifyDeviceId: null,
       setSpotifyDeviceId: (id) => set({ spotifyDeviceId: id }),
+      needsReauth: false,
+      setNeedsReauth: (v) => set({ needsReauth: v }),
 
       // ── Player ────────────────────────────────────────────────────────
       playing: false,

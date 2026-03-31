@@ -792,6 +792,7 @@ img { display: block; }
   padding: 0 20px;
   height: 100%;
   gap: 16px;
+  position: relative;
 }
 
 .player-track {
