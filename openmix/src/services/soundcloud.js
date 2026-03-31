@@ -37,6 +37,34 @@ export function normalizeSoundCloudTrack(t) {
   }
 }
 
+// ── Resolve by URL (no client_id needed) ─────────────────────────────────────
+
+export async function resolveByUrl(trackUrl) {
+  const res = await fetch(
+    `https://soundcloud.com/oembed?url=${encodeURIComponent(trackUrl)}&format=json`
+  )
+  if (!res.ok) throw new Error('Could not resolve SoundCloud URL')
+  const data = await res.json()
+
+  // Extract track ID from the embed iframe src
+  const idMatch = data.html?.match(/tracks%2F(\d+)/) || data.html?.match(/tracks\/(\d+)/)
+  const soundcloudId = idMatch ? parseInt(idMatch[1]) : null
+
+  return {
+    id: `soundcloud:${soundcloudId || encodeURIComponent(trackUrl)}`,
+    source: 'soundcloud',
+    title: data.title || 'Unknown',
+    artist: data.author_name || 'Unknown',
+    album: '',
+    duration: 0,
+    artworkUrl: data.thumbnail_url?.replace('-large', '-t300x300') || null,
+    previewUrl: null,
+    permalinkUrl: trackUrl,
+    soundcloudId,
+    externalUrl: trackUrl,
+  }
+}
+
 // ── Widget URL ────────────────────────────────────────────────────────────────
 
 export function getWidgetUrl(trackUrl) {

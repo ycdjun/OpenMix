@@ -29,8 +29,9 @@ export async function initiateSpotifyAuth(clientId, redirectUri) {
   const challenge = await generateCodeChallenge(verifier)
   localStorage.setItem('spotify_code_verifier', verifier)
 
-  // Encode verifier in state so cross-origin redirects (e.g. localhost → github.io) still work
-  const state = btoa(JSON.stringify({ verifier }))
+  // Encode all values needed for token exchange in state — handles cross-origin redirects
+  // (e.g. localhost initiates auth, github.io receives callback with no config in localStorage)
+  const state = btoa(JSON.stringify({ verifier, clientId, redirectUri }))
 
   const params = new URLSearchParams({
     client_id: clientId,

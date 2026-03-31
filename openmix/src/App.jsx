@@ -23,19 +23,29 @@ export default function App() {
       return
     }
 
-    if (code && config.spotifyClientId) {
-      // Restore verifier from state param (handles cross-origin redirects)
-      const state = params.get('state')
-      if (state) {
-        try {
-          const { verifier } = JSON.parse(atob(state))
-          if (verifier) localStorage.setItem('spotify_code_verifier', verifier)
-        } catch (_) {}
-      }
+    // Extract everything we need from the state param — clientId and redirectUri are
+    // encoded there so the exchange works even when this page has empty localStorage
+    // (e.g. auth initiated on localhost, callback lands on github.io)
+    let effectiveClientId = config.spotifyClientId
+    let effectiveRedirectUri = config.redirectUri
+    const stateParam = params.get('state')
+    if (stateParam) {
+      try {
+        const stateData = JSON.parse(atob(stateParam))
+        if (stateData.verifier) localStorage.setItem('spotify_code_verifier', stateData.verifier)
+        if (stateData.clientId) effectiveClientId = stateData.clientId
+        if (stateData.redirectUri) effectiveRedirectUri = stateData.redirectUri
+        // Persist config so this origin can make API calls after exchange
+        if (!config.spotifyClientId && stateData.clientId) {
+          useStore.getState().setConfig({ spotifyClientId: stateData.clientId, redirectUri: stateData.redirectUri })
+        }
+      } catch (_) {}
+    }
 
+    if (code && effectiveClientId) {
       window.history.replaceState({}, '', window.location.pathname)
 
-      exchangeCodeForToken(code, config.spotifyClientId, config.redirectUri)
+      exchangeCodeForToken(code, effectiveClientId, effectiveRedirectUri)
         .then(async (data) => {
           const expiresAt = Date.now() + data.expires_in * 1000
           setSpotify({

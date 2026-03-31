@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
 import useStore from '../store'
 import { searchSpotify } from '../services/spotify'
-import { searchSoundCloud } from '../services/soundcloud'
+import { searchSoundCloud, resolveByUrl } from '../services/soundcloud'
 import TrackCard from './TrackCard'
 
 function debounce(fn, delay) {
@@ -12,6 +12,8 @@ function debounce(fn, delay) {
   }
 }
 
+const SC_URL_RE = /^https?:\/\/(www\.)?soundcloud\.com\/.+/i
+
 export default function SearchView() {
   const {
     spotify, config,
@@ -19,9 +21,13 @@ export default function SearchView() {
     searchResults, setSearchResults,
     searchLoading, setSearchLoading,
     activeSource, setActiveSource,
+    addToQueue,
   } = useStore()
 
-  const [error, setError] = useState(null)
+  const [scUrlInput, setScUrlInput] = useState('')
+  const [scUrlLoading, setScUrlLoading] = useState(false)
+  const [scUrlError, setScUrlError] = useState(null)
+  const [scUrlTrack, setScUrlTrack] = useState(null)
   const inputRef = useRef(null)
 
   const runSearch = useCallback(
@@ -32,21 +38,16 @@ export default function SearchView() {
       }
 
       setSearchLoading(true)
-      setError(null)
 
       const tasks = []
-      const doSpotify = spToken && (source === 'all' || source === 'spotify')
-      const doSoundCloud = scKey && (source === 'all' || source === 'soundcloud')
-
-      if (doSpotify) {
+      if (spToken && (source === 'all' || source === 'spotify')) {
         tasks.push(
           searchSpotify(q, spToken)
             .then((r) => ({ spotify: r }))
             .catch(() => ({ spotify: [] }))
         )
       }
-
-      if (doSoundCloud) {
+      if (scKey && (source === 'all' || source === 'soundcloud')) {
         tasks.push(
           searchSoundCloud(q, scKey)
             .then((r) => ({ soundcloud: r }))
@@ -73,20 +74,40 @@ export default function SearchView() {
     runSearch(query, src, spotify.accessToken, config.soundcloudClientId)
   }
 
+  const handleScUrlResolve = async () => {
+    if (!scUrlInput.trim()) return
+    setScUrlLoading(true)
+    setScUrlError(null)
+    setScUrlTrack(null)
+    try {
+      const track = await resolveByUrl(scUrlInput.trim())
+      setScUrlTrack(track)
+    } catch {
+      setScUrlError('Could not resolve that URL. Make sure it\'s a public SoundCloud track link.')
+    } finally {
+      setScUrlLoading(false)
+    }
+  }
+
+  const handleScUrlAdd = () => {
+    if (!scUrlTrack) return
+    addToQueue(scUrlTrack)
+    setScUrlTrack(null)
+    setScUrlInput('')
+  }
+
   const hasSpotify = !!spotify.accessToken
   const hasSoundCloud = !!config.soundcloudClientId
-  const hasAny = hasSpotify || hasSoundCloud
+  const hasSearchSources = hasSpotify || hasSoundCloud
 
   const spotifyTracks = searchResults.spotify || []
   const soundcloudTracks = searchResults.soundcloud || []
-
   const showSpotify = activeSource === 'all' || activeSource === 'spotify'
   const showSoundCloud = activeSource === 'all' || activeSource === 'soundcloud'
   const hasResults = spotifyTracks.length > 0 || soundcloudTracks.length > 0
 
   return (
     <div className="search-view">
-      {/* Header */}
       <div className="search-header">
         <div className="search-bar-wrap">
           <svg className="search-bar-icon" viewBox="0 0 20 20" fill="currentColor">
@@ -96,14 +117,10 @@ export default function SearchView() {
             ref={inputRef}
             className="search-bar"
             type="text"
-            placeholder={
-              !hasAny
-                ? 'Connect a source in Settings to search…'
-                : 'Search tracks, artists, albums…'
-            }
+            placeholder={hasSearchSources ? 'Search tracks, artists, albums…' : 'Connect Spotify or add a SoundCloud API key to search…'}
             value={query}
             onChange={handleQueryChange}
-            disabled={!hasAny}
+            disabled={!hasSearchSources}
             autoFocus
           />
           {query && (
@@ -118,12 +135,8 @@ export default function SearchView() {
           )}
         </div>
 
-        {/* Source tabs */}
         <div className="source-tabs">
-          <button
-            className={`source-tab ${activeSource === 'all' ? 'active' : ''}`}
-            onClick={() => handleSourceChange('all')}
-          >
+          <button className={`source-tab ${activeSource === 'all' ? 'active' : ''}`} onClick={() => handleSourceChange('all')}>
             All Sources
           </button>
           <button
@@ -132,8 +145,7 @@ export default function SearchView() {
             disabled={!hasSpotify}
             style={!hasSpotify ? { opacity: 0.4 } : {}}
           >
-            <span className="source-tab-dot spotify" />
-            Spotify
+            <span className="source-tab-dot spotify" />Spotify
           </button>
           <button
             className={`source-tab ${activeSource === 'soundcloud' ? 'active green' : ''}`}
@@ -141,26 +153,69 @@ export default function SearchView() {
             disabled={!hasSoundCloud}
             style={!hasSoundCloud ? { opacity: 0.4 } : {}}
           >
-            <span className="source-tab-dot soundcloud" />
-            SoundCloud
+            <span className="source-tab-dot soundcloud" />SoundCloud
           </button>
         </div>
       </div>
 
-      {/* Results */}
       <div className="search-results">
-        {!hasAny && (
-          <div className="empty-state">
-            <div className="empty-state-icon">🔌</div>
-            <div className="empty-state-title">No sources connected</div>
-            <div className="empty-state-body">
-              Connect Spotify or add a SoundCloud API key in Settings to start searching.
+        {/* SoundCloud URL adder — always visible when no SC client_id */}
+        {!hasSoundCloud && (
+          <div style={{ marginBottom: 24 }}>
+            <div className="results-section-header" style={{ marginBottom: 10 }}>
+              <span className="results-section-label">SoundCloud</span>
+              <span className="results-source-badge soundcloud">Add by URL</span>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                className="form-input"
+                style={{ flex: 1, fontSize: 13 }}
+                type="text"
+                placeholder="Paste a SoundCloud track URL…"
+                value={scUrlInput}
+                onChange={(e) => { setScUrlInput(e.target.value); setScUrlError(null); setScUrlTrack(null) }}
+                onKeyDown={(e) => e.key === 'Enter' && handleScUrlResolve()}
+              />
+              <button
+                className="btn btn-ghost"
+                onClick={handleScUrlResolve}
+                disabled={scUrlLoading || !scUrlInput.trim()}
+              >
+                {scUrlLoading ? <div className="loading-spinner" /> : 'Resolve'}
+              </button>
+            </div>
+            {scUrlError && (
+              <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 6 }}>{scUrlError}</div>
+            )}
+            {scUrlTrack && (
+              <div style={{ marginTop: 10 }}>
+                <TrackCard track={scUrlTrack} />
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, paddingLeft: 10 }}>
+                  <button className="btn btn-primary btn-sm" onClick={handleScUrlAdd}>
+                    Add to Mix
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setScUrlTrack(null)}>
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
+            <div style={{ fontSize: 11.5, color: 'var(--text-dim)', marginTop: 8 }}>
+              For full SoundCloud search, add a Client ID in Settings.
             </div>
           </div>
         )}
 
-        {hasAny && !query && (
-          <div className="empty-state">
+        {!hasSearchSources && !hasSoundCloud && (
+          <div className="empty-state" style={{ paddingTop: 16 }}>
+            <div className="empty-state-icon">🔌</div>
+            <div className="empty-state-title">Connect Spotify to search</div>
+            <div className="empty-state-body">SoundCloud tracks can be added by URL above without an API key.</div>
+          </div>
+        )}
+
+        {hasSearchSources && !query && (
+          <div className="empty-state" style={{ paddingTop: hasSoundCloud ? 48 : 16 }}>
             <div className="empty-state-icon">🔍</div>
             <div className="empty-state-title">Search your music</div>
             <div className="empty-state-body">
@@ -171,8 +226,7 @@ export default function SearchView() {
 
         {searchLoading && (
           <div className="loading-row">
-            <div className="loading-spinner" />
-            Searching…
+            <div className="loading-spinner" />Searching…
           </div>
         )}
 
@@ -193,13 +247,10 @@ export default function SearchView() {
                   <span className="results-source-badge spotify">{spotifyTracks.length} tracks</span>
                 </div>
                 <div className="track-list">
-                  {spotifyTracks.map((track) => (
-                    <TrackCard key={track.id} track={track} />
-                  ))}
+                  {spotifyTracks.map((t) => <TrackCard key={t.id} track={t} />)}
                 </div>
               </div>
             )}
-
             {showSoundCloud && soundcloudTracks.length > 0 && (
               <div className="results-section">
                 <div className="results-section-header">
@@ -207,9 +258,7 @@ export default function SearchView() {
                   <span className="results-source-badge soundcloud">{soundcloudTracks.length} tracks</span>
                 </div>
                 <div className="track-list">
-                  {soundcloudTracks.map((track) => (
-                    <TrackCard key={track.id} track={track} />
-                  ))}
+                  {soundcloudTracks.map((t) => <TrackCard key={t.id} track={t} />)}
                 </div>
               </div>
             )}
