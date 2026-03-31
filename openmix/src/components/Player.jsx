@@ -271,39 +271,46 @@ export default function Player() {
 
       <div className="player">
         {/* SDK error banners */}
-        {(needsReauth || sdkError === 'account' || playbackError) && (
-          <div style={{
-            position: 'absolute', top: 0, left: 0, right: 0,
-            background: sdkError === 'account' ? '#b91c1c' : 'var(--spotify)',
-            color: sdkError === 'account' ? '#fff' : '#000',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            gap: 12, padding: '6px 16px', fontSize: 13, fontWeight: 500, zIndex: 10,
-          }}>
-            {sdkError === 'account' ? (
-              <span>Spotify Premium is required for full-track playback</span>
-            ) : playbackError && !needsReauth ? (
-              <span title={playbackError}>Playback error: {playbackError}</span>
-            ) : (
-              <>
-                <span>Spotify needs updated permissions to play tracks</span>
-                <button
-                  style={{
-                    background: '#000', color: 'var(--spotify)',
-                    border: 'none', borderRadius: 20, padding: '4px 14px',
-                    fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                  }}
-                  onClick={() => {
-                    setNeedsReauth(false)
-                    setSdkError(null)
-                    initiateSpotifyAuth(config.spotifyClientId, config.redirectUri)
-                  }}
-                >
-                  Reconnect
-                </button>
-              </>
-            )}
-          </div>
-        )}
+        {(needsReauth || sdkError === 'account' || playbackError) && (() => {
+          // If authentication_error fires but the user IS on Premium, it's a scope issue → reconnect.
+          // If not Premium (or account_error), Premium upgrade is the fix.
+          const notPremium = sdkError === 'account' ||
+            (needsReauth && spotify.user && spotify.user.product !== 'premium')
+          const isRed = notPremium || (playbackError && !needsReauth)
+          return (
+            <div style={{
+              position: 'absolute', top: 0, left: 0, right: 0,
+              background: isRed ? '#b91c1c' : 'var(--spotify)',
+              color: isRed ? '#fff' : '#000',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              gap: 12, padding: '6px 16px', fontSize: 13, fontWeight: 500, zIndex: 10,
+            }}>
+              {notPremium ? (
+                <span>Spotify Premium is required for full-track playback</span>
+              ) : playbackError && !needsReauth ? (
+                <span title={playbackError}>Playback error: {playbackError}</span>
+              ) : (
+                <>
+                  <span>Spotify needs updated permissions to play tracks</span>
+                  <button
+                    style={{
+                      background: '#000', color: 'var(--spotify)',
+                      border: 'none', borderRadius: 20, padding: '4px 14px',
+                      fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    }}
+                    onClick={() => {
+                      setNeedsReauth(false)
+                      setSdkError(null)
+                      initiateSpotifyAuth(config.spotifyClientId, config.redirectUri)
+                    }}
+                  >
+                    Reconnect
+                  </button>
+                </>
+              )}
+            </div>
+          )
+        })()}
 
         {/* Track info */}
         <div className="player-track">

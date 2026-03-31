@@ -40,6 +40,10 @@ export async function initiateSpotifyAuth(clientId, redirectUri) {
     code_challenge_method: 'S256',
     code_challenge: challenge,
     state,
+    // Force consent screen so Spotify always re-grants all requested scopes
+    // (without this, Spotify silently reuses a cached authorization that may
+    // be missing the 'streaming' scope added after first login)
+    show_dialog: 'true',
     scope: [
       'user-read-private',
       'user-read-email',
