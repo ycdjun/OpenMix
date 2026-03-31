@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "openmix (dev)",
+      "runtimeExecutable": "wsl",
+      "runtimeArgs": ["-e", "npm", "--prefix", "/home/yongchamp/projects/openmix", "run", "dev", "--", "--host"],
+      "port": 5173
+    },
+    {
+      "name": "openmix (preview)",
+      "runtimeExecutable": "wsl",
+      "runtimeArgs": ["-e", "npm", "--prefix", "/home/yongchamp/projects/openmix", "run", "preview", "--", "--host"],
+      "port": 4173
+    }
+  ]
+}
